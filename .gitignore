@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.env.local
+data/db/*.sqlite3-*
+data/raw/
+!data/raw/.gitkeep
+# The knowledge-store DB itself IS committed (unlike raw HTML/JSON cache or
+# -wal/-shm files above) -- Streamlit Community Cloud only clones the repo,
+# doesn't run the scraper, so the deployed app needs the scraped data to
+# ship with the source. See README's "Data" section.
+!data/db/petbarn_intel.sqlite3
+data/snapshot/*.gz
+.streamlit/secrets.toml
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+.DS_Store
+*.log

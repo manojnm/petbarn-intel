@@ -1,0 +1,35 @@
+# Pinned for Streamlit Community Cloud (and any plain `pip install -r
+# requirements.txt`) -- mirrors pyproject.toml's core `dependencies`, minus
+# the optional extras (`browser`/Playwright, `local-embeddings`/fastembed,
+# `observability`/Langfuse, `dev`) that the deployed chat app doesn't need:
+# on Streamlit Cloud, ENABLE_PLAYWRIGHT=false and LLM_PROVIDER=openai (its
+# own OpenAI key, never Azure -- see .streamlit/secrets.toml.example), so
+# neither Playwright nor fastembed ever runs.
+httpx[http2]>=0.27
+curl_cffi>=0.7
+beautifulsoup4>=4.12
+lxml>=5.2
+tenacity>=8.2
+structlog>=24.1
+typer>=0.12
+rich>=13.7
+python-dotenv>=1.0
+orjson>=3.10
+rapidfuzz>=3.9
+sqlglot>=25.0
+pydantic>=2.7
+pydantic-settings>=2.3
+vaderSentiment>=3.3.2
+markdownify>=0.13
+tiktoken>=0.7
+langgraph>=0.2.60
+langgraph-checkpoint-sqlite>=2.0
+langchain-core>=0.3
+langchain-openai>=0.2
+langchain-litellm>=0.1.4
+litellm>=1.48
+streamlit>=1.38
+pandas>=2.0
+pyyaml>=6.0
+cachetools>=5.4
+sqlite-vec>=0.1.6

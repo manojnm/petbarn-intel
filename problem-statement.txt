@@ -1,0 +1,42 @@
+Hi Manoj,
+
+ As discussed, please find the technical assessment below.
+
+Technical Take-Home Project: GenAI & Scraping POC
+
+Role: Senior AI Engineer (GenAI Scraping Developer)
+Overview
+
+At our company, we build end-to-end data pipelines that leverage modern Generative AI to deliver actionable insights. Instead of a traditional algorithmic coding test, this small Proof-of-Concept (POC) project gives you the opportunity to demonstrate your architectural choices, product mindset, and capability with modern AI tools. 
+
+Project Task
+
+Build and deploy an interactive Streamlit chatbot application (we encourage using Streamlit’s chat elements or standard chatbot template). The chatbot should act as an assistant that answers user queries about an e-commerce retailer’s product catalog by dynamically invoking custom tools to retrieve product details and customer reviews on demand.
+
+Key Requirements
+
+Agentic Capabilities
+Your LLM assistant must be configured with explicit tools that it can invoke based on user prompts:
+Fetches specifications, pricing, brand, and basic details for a product.
+Extracts customer reviews, ratings, and sentiment for a specified product.
+Scraping & Data Ingestion
+Extract real product details and customer reviews for a selection of 8–10 products from Petbarn (petbarn.com.au).
+Tools can perform live web scraping on demand or retrieve pre-fetched data via your tools.
+Conversational Interface (Streamlit UI)
+The user should be able to ask natural questions, such as:
+"What are people saying about the price and quality of Product X?"
+"Can you compare the reviews between Product X and Product Y?"
+"List the main pros and cons based on recent customer feedback for Product Z."
+Deployment
+The application must be publicly accessible online via a hosted environment (e.g., Streamlit Community Cloud, Hugging Face Spaces, Render, or another platform of your choice). 
+Guidelines & Permissions
+
+You are fully permitted and encouraged to use AI tools (e.g., ChatGPT, Claude, GitHub Copilot, Cursor) to assist your development. We evaluate final code structure, design decisions, and system reliability.
+You may use any model provider of your choice (OpenAI, Anthropic, Groq, Google Gemini, or local models via Ollama). Free-tier or low-cost models are completely sufficient.
+E-commerce sites can be unpredictable. If you encounter blocking during implementation, focus on demonstrating a robust architecture (e.g., caching raw HTML/JSON responses or providing a fallback sample dataset) rather than spending hours bypassing anti-bot measures. 
+Deliverables
+
+Please reply with the following links by your deadline:
+
+GitHub Repository: Containing your source code and a clean README.md.
+Live Application URL: A working link to your deployed Streamlit application.
