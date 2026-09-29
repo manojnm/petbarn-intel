@@ -17,12 +17,7 @@ sync_secrets_to_env()
 
 from petbarn_intel.agent.graph import run_turn  # noqa: E402
 from petbarn_intel.agent.llm import chat  # noqa: E402
-from petbarn_intel.app.charts import (  # noqa: E402
-    render_charts_from_evidence,
-    render_source_line,
-    wants_charts,
-    wants_sources,
-)
+from petbarn_intel.app.charts import render_charts_from_evidence  # noqa: E402
 from petbarn_intel.app.styles import inject_css  # noqa: E402
 from petbarn_intel.config import get_settings  # noqa: E402
 from petbarn_intel.logging import ensure_configured  # noqa: E402
@@ -114,6 +109,63 @@ def _extract_product_ids(evidence: list[dict]) -> list[str]:
     return ids[:4]
 
 
+def _llm_pick_product_ids(answer: str, existing_ids: list[str]) -> list[str]:
+    """Ask the mini LLM whether to show product cards and which products to show.
+
+    Returns the final list of product_ids to display (may be empty if the LLM
+    decides cards are not appropriate for this answer).
+    """
+    if not settings.has_llm_credentials:
+        return existing_ids  # fall back to whatever tool calls surfaced
+
+    prompt = (
+        "You are a UI assistant for a pet-product shopping chatbot.\n"
+        "Decide whether the answer below warrants showing product image cards to the user.\n\n"
+        "Rules:\n"
+        "- Return YES only when the answer references one or more **specific named products** "
+        "(e.g. 'Royal Canin Golden Retriever Dog Food 12kg', 'Black Hawk Chicken & Rice').\n"
+        "- Return NO for greetings, general advice, out-of-scope refusals, or answers that "
+        "only mention generic product types ('dry dog food', 'cat litter') without naming a product.\n\n"
+        "If YES, list up to 4 product names, one per line, EXACTLY as they appear in the answer.\n"
+        "If NO, reply with just the word NO.\n\n"
+        f"Answer:\n{answer[:800]}"
+    )
+    try:
+        raw = chat([{"role": "user", "content": prompt}], role="mini").strip()
+    except Exception:  # noqa: BLE001
+        return existing_ids
+
+    if raw.upper().startswith("NO"):
+        return []  # LLM says: don't show cards
+
+    # LLM returned product names — look each one up in the DB
+    names = [ln.strip().lstrip("-•* ") for ln in raw.splitlines() if ln.strip() and not ln.upper().startswith("YES")]
+    conn = get_connection()
+    seen = set(existing_ids)
+    result_ids = list(existing_ids)
+
+    for name in names[:4]:
+        if len(result_ids) >= 4:
+            break
+        if not name or len(name) < 5:
+            continue
+        # Try exact-ish LIKE match first, then shrink to first 4 words
+        for query in (name, " ".join(name.split()[:4])):
+            rows = conn.execute(
+                "SELECT product_id FROM products WHERE name LIKE ? "
+                "ORDER BY review_count DESC NULLS LAST LIMIT 1",
+                (f"%{query}%",),
+            ).fetchall()
+            if rows:
+                pid = rows[0]["product_id"]
+                if pid not in seen:
+                    seen.add(pid)
+                    result_ids.append(pid)
+                break
+
+    return result_ids[:4]
+
+
 def _render_product_cards(product_ids: list[str]) -> None:
     if not product_ids:
         return
@@ -187,24 +239,8 @@ def _render_charts_and_sources(
     evidence: list[dict],
     key_suffix: str,
 ) -> None:
-    """Render charts and/or source citation, gated on intent or button click."""
-    show_charts = wants_charts(question)
-    show_sources = wants_sources(question)
-
-    col1, col2 = st.columns([1, 1])
-    if not show_charts:
-        with col1:
-            if st.button("📊 Show charts", key=f"charts_{key_suffix}", use_container_width=True):
-                show_charts = True
-    if not show_sources:
-        with col2:
-            if st.button("📍 Show sources", key=f"sources_{key_suffix}", use_container_width=True):
-                show_sources = True
-
-    if show_charts:
-        render_charts_from_evidence(evidence)
-    if show_sources:
-        render_source_line(evidence)
+    """Always render charts when evidence contains chart data; no sources boilerplate."""
+    render_charts_from_evidence(evidence)
 
 
 def _render_trace(mode: str, specialists: list[str], evidence: list[dict], turn_id: str) -> None:
@@ -270,7 +306,7 @@ with st.sidebar:
     total_products = sum(counts.values())
     c1, c2 = st.columns(2)
     c1.metric("Products", f"{total_products:,}")
-    c2.metric("With reviews", f"{counts.get('seed', 0) + counts.get('on_demand', 0):,}")
+    c2.metric("Full product data", f"{counts.get('seed', 0) + counts.get('on_demand', 0):,}")
     conn = get_connection()
     n_reviews = conn.execute("SELECT COUNT(*) as n FROM reviews").fetchone()["n"]
     st.metric("Customer reviews", f"{n_reviews:,}")
@@ -300,11 +336,11 @@ with st.sidebar:
     # Sample questions
     st.markdown("**Try asking**")
     st.markdown(
-        "- *Price and rating of Black Hawk Chicken & Rice?*\n"
-        "- *What do people say about Royal Canin?*\n"
-        "- *Compare Hill's vs Advance dry dog food.*\n"
-        "- *Grain-free cat food under \$50?*\n"
-        "- *Pros and cons of [product] from reviews?*"
+        "- *Compare Royal Canin vs Hill's Science Diet for adult dogs*\n"
+        "- *What do customers say about Black Hawk dry food — taste, quality, value?*\n"
+        "- *Show me the rating breakdown for Royal Canin cat food*\n"
+        "- *Which dry dog food has the best reviews for digestive health?*\n"
+        "- *Grain-free cat food under $60 with the highest ratings*"
     )
 
     st.divider()
@@ -332,7 +368,8 @@ for idx, m in enumerate(st.session_state.messages):
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
         if m["role"] == "assistant":
-            _render_product_cards(m.get("product_ids", []))
+            pids = m.get("product_ids", [])  # already decided at write-time; no re-call on replay
+            _render_product_cards(pids)
             _render_charts_and_sources(
                 m.get("question", ""),
                 m.get("evidence", []),
@@ -381,8 +418,9 @@ if question:
 
         st.markdown(result["answer"])
 
-        # Product image cards
+        # Product image cards — LLM decides whether cards are warranted
         product_ids = _extract_product_ids(result["evidence"])
+        product_ids = _llm_pick_product_ids(result["answer"], product_ids)
         _render_product_cards(product_ids)
 
         # Charts and source citation (gated on intent or button)

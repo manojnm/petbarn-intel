@@ -1,3 +1,8 @@
+# Install the local package first so `petbarn_intel` is importable on
+# Streamlit Cloud (which runs `pip install -r requirements.txt` without
+# `pip install -e .`).
+-e .
+
 # Pinned for Streamlit Community Cloud (and any plain `pip install -r
 # requirements.txt`) -- mirrors pyproject.toml's core `dependencies`, minus
 # the optional extras (`browser`/Playwright, `local-embeddings`/fastembed,
