@@ -1,0 +1,1322 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-motion-capable="true" data-ambient-motion="running">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NIQ PoC — Agent Runtime Architecture</title>
+<style>
+/* ─── Reset & base ─────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+
+/* ─── Theme tokens ─────────────────────────────────────────────── */
+html[data-theme="dark"] {
+  --bg:            #0d1117;
+  --surface:       #161b22;
+  --surface2:      #1c2128;
+  --border:        #30363d;
+  --text:          #e6edf3;
+  --text-muted:    #8b949e;
+  --text-dim:      #484f58;
+  --accent:        #58a6ff;
+  --accent2:       #3fb950;
+  --warn:          #f0883e;
+  --danger:        #ff7b72;
+  --security:      #bc8cff;
+  --node-fill:     #1c2128;
+  --node-stroke:   #30363d;
+  --node-hover:    #388bfd;
+  --edge:          #30363d;
+  --edge-flow:     #58a6ff;
+  --arrow:         #58a6ff;
+  --parallel-bg:   rgba(56,139,253,0.06);
+  --parallel-bd:   rgba(56,139,253,0.3);
+  --sec-bg:        rgba(188,140,255,0.05);
+  --sec-bd:        rgba(188,140,255,0.35);
+  --minimap-bg:    rgba(13,17,23,0.9);
+  --panel-bg:      #161b22;
+  --chip-bg:       #21262d;
+  --chip-hover:    #30363d;
+  --glow:          drop-shadow(0 0 6px rgba(88,166,255,0.5));
+  --glow-sec:      drop-shadow(0 0 6px rgba(188,140,255,0.45));
+}
+html[data-theme="light"] {
+  --bg:            #f6f8fa;
+  --surface:       #ffffff;
+  --surface2:      #f0f3f6;
+  --border:        #d0d7de;
+  --text:          #1f2328;
+  --text-muted:    #57606a;
+  --text-dim:      #9198a1;
+  --accent:        #0969da;
+  --accent2:       #1a7f37;
+  --warn:          #b35900;
+  --danger:        #cf222e;
+  --security:      #8250df;
+  --node-fill:     #ffffff;
+  --node-stroke:   #d0d7de;
+  --node-hover:    #0969da;
+  --edge:          #c8cdd4;
+  --edge-flow:     #0969da;
+  --arrow:         #0969da;
+  --parallel-bg:   rgba(9,105,218,0.04);
+  --parallel-bd:   rgba(9,105,218,0.25);
+  --sec-bg:        rgba(130,80,223,0.04);
+  --sec-bd:        rgba(130,80,223,0.3);
+  --minimap-bg:    rgba(246,248,250,0.92);
+  --panel-bg:      #ffffff;
+  --chip-bg:       #f0f3f6;
+  --chip-hover:    #dde1e6;
+  --glow:          drop-shadow(0 0 5px rgba(9,105,218,0.4));
+  --glow-sec:      drop-shadow(0 0 5px rgba(130,80,223,0.35));
+}
+
+/* ─── Layout ───────────────────────────────────────────────────── */
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 1fr;
+}
+
+/* ─── Header ───────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 10;
+  flex-wrap: wrap;
+}
+.header-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  flex: 1;
+}
+.header-title span {
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 6px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--chip-bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.badge.signal { color: var(--accent); border-color: rgba(88,166,255,0.3); background: rgba(88,166,255,0.07); }
+.pulse-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent2); flex-shrink: 0;
+}
+html[data-motion-capable="true"] .pulse-dot {
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.7); }
+}
+.hdr-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--chip-bg);
+  color: var(--text-muted); cursor: pointer; font-size: 12px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.hdr-btn:hover { background: var(--chip-hover); color: var(--text); }
+.hdr-btn.active { color: var(--accent); border-color: rgba(88,166,255,0.4); background: rgba(88,166,255,0.08); }
+
+/* ─── Diagram canvas ───────────────────────────────────────────── */
+.canvas-wrap {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+  cursor: grab;
+}
+.canvas-wrap.panning { cursor: grabbing; }
+.canvas-wrap svg {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  display: block;
+  user-select: none;
+}
+/* Subtle dot-grid background */
+.canvas-wrap::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image: radial-gradient(circle, var(--text-dim) 1px, transparent 1px);
+  background-size: 28px 28px;
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+/* ─── SVG node styles ──────────────────────────────────────────── */
+.node-rect {
+  rx: 10;
+  fill: var(--node-fill);
+  stroke: var(--node-stroke);
+  stroke-width: 1.5;
+  transition: fill 0.2s, stroke 0.2s, opacity 0.2s;
+  cursor: pointer;
+}
+.node-group:hover .node-rect,
+.node-group.selected .node-rect {
+  stroke: var(--node-hover);
+  filter: var(--glow);
+}
+.node-group.dimmed { opacity: 0.22; pointer-events: none; }
+.node-group.selected .node-rect { stroke-width: 2; }
+
+/* Node header band */
+.node-band {
+  rx: 8;
+  fill: var(--node-stroke);
+  transition: fill 0.2s;
+}
+.node-group.selected .node-band { fill: var(--node-hover); }
+
+/* Node text */
+.node-label {
+  fill: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+.node-sub {
+  fill: var(--text-muted);
+  font-size: 10px;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+.tool-chip-text {
+  fill: var(--text-muted);
+  font-size: 9.5px;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+.security-icon {
+  fill: var(--security);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+/* ─── Edge / arrow styles ──────────────────────────────────────── */
+.edge {
+  fill: none;
+  stroke: var(--edge);
+  stroke-width: 1.5;
+  transition: stroke 0.2s, opacity 0.2s;
+}
+.edge.highlighted { stroke: var(--edge-flow); }
+.edge.dimmed { opacity: 0.08; }
+
+/* Animated flow dot along edge */
+.edge-flow-path {
+  fill: none;
+  stroke: var(--edge-flow);
+  stroke-width: 3;
+  stroke-linecap: round;
+  opacity: 0;
+}
+html[data-ambient-motion="running"] .edge-flow-path[data-animate="edge"] {
+  opacity: 1;
+  animation: edge-flow-anim var(--dur, 2.2s) linear infinite;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes edge-flow-anim {
+  0%   { stroke-dasharray: 8 200; stroke-dashoffset: 0;  opacity: 0.15; }
+  15%  { opacity: 0.9; }
+  85%  { opacity: 0.9; }
+  100% { stroke-dasharray: 8 200; stroke-dashoffset: -220; opacity: 0.1; }
+}
+
+/* Security dashed edges */
+.edge-security {
+  fill: none;
+  stroke: var(--security);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+/* Band / zone rects */
+.zone-rect {
+  rx: 12;
+  transition: opacity 0.2s;
+}
+.zone-parallel { fill: var(--parallel-bg); stroke: var(--parallel-bd); stroke-width: 1; stroke-dasharray: 6 4; }
+.zone-security { fill: var(--sec-bg); stroke: var(--sec-bd); stroke-width: 1.5; stroke-dasharray: 5 3; }
+
+/* ─── Detail panel ─────────────────────────────────────────────── */
+.detail-panel {
+  position: absolute;
+  top: 12px; right: 12px;
+  width: 300px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  transform: translateX(340px);
+  transition: transform 0.28s cubic-bezier(.4,0,.2,1), opacity 0.2s;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 20;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.35);
+}
+.detail-panel.open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: all;
+}
+.dp-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+.dp-title { font-weight: 600; font-size: 13px; flex: 1; }
+.dp-type { font-size: 10px; color: var(--text-muted); padding: 1px 6px; border-radius: 4px; background: var(--chip-bg); }
+.dp-close {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted); font-size: 16px; line-height: 1;
+  padding: 0 2px;
+  transition: color 0.15s;
+}
+.dp-close:hover { color: var(--text); }
+.dp-body { padding: 12px 14px; overflow-y: auto; max-height: calc(100vh - 200px); }
+.dp-section { margin-bottom: 14px; }
+.dp-section-title {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.dp-row { display: flex; gap: 6px; margin-bottom: 4px; font-size: 12px; }
+.dp-key { color: var(--text-muted); min-width: 90px; flex-shrink: 0; }
+.dp-val { color: var(--text); }
+.dp-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.dp-chip {
+  display: inline-block;
+  padding: 2px 8px; border-radius: 20px;
+  font-size: 11px;
+  background: var(--chip-bg); color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.dp-chip.accent { color: var(--accent); border-color: rgba(88,166,255,0.3); background: rgba(88,166,255,0.07); }
+.dp-chip.security { color: var(--security); border-color: rgba(188,140,255,0.3); background: rgba(188,140,255,0.07); }
+.dp-chip.warn { color: var(--warn); border-color: rgba(240,136,62,0.3); background: rgba(240,136,62,0.07); }
+.dp-note {
+  font-size: 11px; color: var(--text-muted); line-height: 1.55;
+  padding: 8px 10px; background: var(--surface2); border-radius: 6px;
+  border-left: 3px solid var(--border);
+}
+.dp-note.warn { border-left-color: var(--warn); }
+.dp-note.security { border-left-color: var(--security); }
+
+/* ─── Minimap ──────────────────────────────────────────────────── */
+.minimap {
+  position: absolute;
+  bottom: 16px; left: 16px;
+  width: 140px; height: 130px;
+  background: var(--minimap-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  z-index: 20;
+  backdrop-filter: blur(8px);
+  transition: opacity 0.2s;
+}
+.minimap.hidden { opacity: 0; pointer-events: none; }
+.minimap canvas { width: 100%; height: 100%; display: block; }
+.minimap-viewport {
+  position: absolute;
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+  pointer-events: none;
+  background: rgba(88,166,255,0.06);
+}
+
+/* ─── Zoom controls ────────────────────────────────────────────── */
+.zoom-controls {
+  position: absolute;
+  bottom: 16px; right: 16px;
+  display: flex; flex-direction: column; gap: 4px;
+  z-index: 20;
+}
+.zoom-btn {
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; cursor: pointer; color: var(--text-muted);
+  font-size: 16px; font-weight: 300;
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+}
+.zoom-btn:hover { background: var(--chip-hover); color: var(--text); }
+.zoom-label {
+  text-align: center; font-size: 10px; color: var(--text-muted);
+  padding: 2px 0;
+}
+
+/* ─── Tooltip ──────────────────────────────────────────────────── */
+.tooltip {
+  position: absolute;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  pointer-events: none;
+  z-index: 30;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.12s;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+}
+.tooltip.visible { opacity: 1; }
+
+/* ─── Focus chip ───────────────────────────────────────────────── */
+.focus-chip {
+  position: absolute;
+  top: 12px; left: 50%; transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 11px; color: var(--text-muted);
+  z-index: 20;
+  display: none;
+  gap: 6px; align-items: center;
+}
+.focus-chip.visible { display: flex; }
+.focus-chip button {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted); font-size: 12px;
+  transition: color 0.15s;
+}
+.focus-chip button:hover { color: var(--text); }
+
+/* ─── Legend ───────────────────────────────────────────────────── */
+.legend {
+  position: absolute;
+  bottom: 16px; left: 168px;
+  background: var(--minimap-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 11px;
+  z-index: 20;
+  backdrop-filter: blur(8px);
+  transition: opacity 0.2s;
+}
+.legend.hidden { opacity: 0; pointer-events: none; }
+.legend-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; color: var(--text-muted); }
+.legend-line {
+  width: 24px; height: 2px;
+  display: inline-block; border-radius: 1px;
+  flex-shrink: 0;
+}
+.legend-box {
+  width: 14px; height: 10px;
+  display: inline-block; border-radius: 2px;
+  flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+<!-- ─── Header ──────────────────────────────────────────────────── -->
+<header class="header">
+  <div class="header-title">
+    NIQ PoC — Agent Runtime
+    <span>LangGraph multi-agent architecture</span>
+  </div>
+  <span class="badge signal"><span class="pulse-dot"></span>signal-flow</span>
+  <button class="hdr-btn active" id="btn-motion" title="Toggle animation">▶ Motion</button>
+  <button class="hdr-btn active" id="btn-minimap" title="Toggle minimap">⊞ Minimap</button>
+  <button class="hdr-btn active" id="btn-legend" title="Toggle legend">∷ Legend</button>
+  <button class="hdr-btn" id="btn-theme" title="Toggle theme">◑ Theme</button>
+  <button class="hdr-btn" id="btn-fit" title="Fit diagram (F)">⊡ Fit</button>
+</header>
+
+<!-- ─── Canvas ──────────────────────────────────────────────────── -->
+<div class="canvas-wrap" id="canvas">
+
+  <!-- ─── SVG ─────────────────────────────────────────────────── -->
+  <svg id="svg" data-animation="trace" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <!-- Arrowhead markers -->
+      <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="var(--arrow)" />
+      </marker>
+      <marker id="arrow-sec" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="var(--security)" />
+      </marker>
+      <marker id="arrow-hl" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="var(--edge-flow)" />
+      </marker>
+    </defs>
+
+    <!--
+      Coordinate system:
+        Canvas total: ~1200 × 1380
+        Nodes are 200×64 (standard) or 200×130 (specialist with tools)
+        Horizontal: User/Guard/Planner centred at x=500; specialists spread at x=160,500,840
+        Vertical rows: User=60, Guard=200, Planner=380, Specialists=560, Synth=790, OGuard=970, Verifier=1150, Answer=1150
+    -->
+    <g id="scene">
+
+      <!-- ══════════════════════════════════════════════════════
+           ZONES / BANDS
+      ══════════════════════════════════════════════════════════ -->
+
+      <!-- Parallel fan-out zone -->
+      <rect class="zone-rect zone-parallel" x="80" y="520" width="1040" height="320" />
+      <text x="1100" y="540" fill="var(--parallel-bd)" font-size="10" text-anchor="end" font-weight="600" letter-spacing="0.06em">PARALLEL FAN-OUT</text>
+
+      <!-- Input guard security zone -->
+      <rect class="zone-rect zone-security" x="380" y="160" width="440" height="110" />
+      <text x="396" y="180" fill="var(--sec-bd)" font-size="10" font-weight="600" letter-spacing="0.06em">① INPUT GUARD</text>
+
+      <!-- Output guard security zone -->
+      <rect class="zone-rect zone-security" x="380" y="930" width="440" height="110" />
+      <text x="396" y="950" fill="var(--sec-bd)" font-size="10" font-weight="600" letter-spacing="0.06em">③ OUTPUT GUARD</text>
+
+      <!-- Untrusted envelope callout zone -->
+      <rect class="zone-rect zone-security" x="80" y="520" width="1040" height="320"
+            fill="none" stroke="var(--security)" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.25" rx="12"/>
+      <text x="96" y="540" fill="var(--security)" font-size="10" font-weight="600" opacity="0.6" letter-spacing="0.05em">② @untrusted_tool ENVELOPE</text>
+
+      <!-- ══════════════════════════════════════════════════════
+           EDGES  (drawn before nodes so nodes sit on top)
+      ══════════════════════════════════════════════════════════ -->
+
+      <!-- User → Guard -->
+      <path id="e-user-guard" class="edge" d="M600,124 L600,160" marker-end="url(#arrow)" data-from="user" data-to="guard" />
+      <path class="edge-flow-path" data-animate="edge" style="--dur:2s;--delay:0s"
+            d="M600,124 L600,160" />
+
+      <!-- Guard → Planner -->
+      <path id="e-guard-planner" class="edge" d="M600,264 L600,340" marker-end="url(#arrow)" data-from="guard" data-to="planner" />
+      <path class="edge-flow-path" data-animate="edge" style="--dur:2s;--delay:0.25s"
+            d="M600,264 L600,340" />
+
+      <!-- Planner → Catalog (fan-out) -->
+      <path id="e-plan-cat" class="edge" d="M560,404 Q560,480 260,560" marker-end="url(#arrow)" data-from="planner" data-to="catalog" />
+      <path class="edge-flow-path" data-animate="edge" style="--dur:2.4s;--delay:0.5s"
+            d="M560,404 Q560,480 260,560" />
+
+      <!-- Planner → Review (fan-out) -->
+      <path id="e-plan-rev" class="edge" d="M600,404 L600,560" marker-end="url(#arrow)" data-from="planner" data-to="review" />
+      <path class="edge-flow-path" data-animate="edge" style="--dur:2.4s;--delay:0.65s"
+            d="M600,404 L600,560" />
+
+      <!-- Planner → Scraper (fan-out) -->
+      <path id="e-plan-scr" class="edge" d="M640,404 Q640,480 940,560" marker-end="url(#arrow)" data-from="planner" data-to="scraper" />
+      <path class="edge-flow-path" data-animate="edge" style="--dur:2.4s;--delay:0.8s"
+            d="M640,404 Q640,480 940,560" />
+
+      <!-- Catalog → Synthesizer -->
+      <path id="e-cat-synth" class="edge" d="M260,710 Q260,770 560,810" marker-end="url(#arrow)" data-from="catalog" data-to="synth" />
+      <path class="edge-flow-path" data-animate="edge" style="--dur:2.2s;--delay:1.1s"
+            d="M260,710 Q260,770 560,810" />
+
+      <!-- Review → Synthesizer -->
+      <path id="e-rev-synth" class="edge" d="M600,710 L600,810" marker-end="url(#arrow)" data-from="review" data-to="synth" />
+      <path class="edge-flow-path" data-animate="edge" style="--dur:2.2s;--delay:1.25s"
+            d="M600,710 L600,810" />
+
+      <!-- Scraper → Synthesizer -->
+      <path id="e-scr-synth" class="edge" d="M940,710 Q940,770 640,810" marker-end="url(#arrow)" data-from="scraper" data-to="synth" />
+      <path class="edge-flow-path" data-animate="edge" style="--dur:2.2s;--delay:1.4s"
+            d="M940,710 Q940,770 640,810" />
+
+      <!-- Synthesizer → OutputGuard -->
+      <path id="e-synth-og" class="edge" d="M600,874 L600,930" marker-end="url(#arrow)" data-from="synth" data-to="oguard" />
+      <path class="edge-flow-path" data-animate="edge" style="--dur:2s;--delay:1.7s"
+            d="M600,874 L600,930" />
+
+      <!-- OutputGuard → Verifier -->
+      <path id="e-og-verif" class="edge" d="M600,1044 L600,1110" marker-end="url(#arrow)" data-from="oguard" data-to="verif" />
+      <path class="edge-flow-path" data-animate="edge" style="--dur:2s;--delay:2s"
+            d="M600,1044 L600,1110" />
+
+      <!-- Verifier → Answer -->
+      <path id="e-verif-ans" class="edge" d="M700,1155 L820,1155" marker-end="url(#arrow)" data-from="verif" data-to="answer" />
+      <path class="edge-flow-path" data-animate="edge" style="--dur:1.8s;--delay:2.3s"
+            d="M700,1155 L820,1155" />
+
+      <!-- Verifier bump-retry back to Planner -->
+      <path id="e-retry" class="edge" d="M500,1155 Q200,1155 200,700 Q200,200 490,380"
+            stroke-dasharray="6 4" marker-end="url(#arrow)"
+            data-from="verif" data-to="planner" />
+      <path class="edge-flow-path" data-animate="edge" style="--dur:3.2s;--delay:2.8s"
+            d="M500,1155 Q200,1155 200,700 Q200,200 490,380" />
+      <text x="148" y="725" fill="var(--text-dim)" font-size="9" transform="rotate(-90,148,725)">bump_retry</text>
+
+      <!-- ══════════════════════════════════════════════════════
+           NODES
+      ══════════════════════════════════════════════════════════ -->
+
+      <!-- ── User ── -->
+      <g class="node-group" id="node-user" data-id="user"
+         transform="translate(500,60)" style="cursor:pointer">
+        <rect class="node-rect" x="0" y="0" width="200" height="64" />
+        <rect class="node-band" x="0" y="0" width="200" height="24" rx="10" ry="10" />
+        <rect x="0" y="14" width="200" height="10" fill="var(--node-stroke)" />
+        <text class="node-label" x="100" y="13" text-anchor="middle">👤 User</text>
+        <text class="node-sub" x="100" y="44" text-anchor="middle">Streamlit chat interface</text>
+        <text class="node-sub" x="100" y="56" text-anchor="middle">natural-language query</text>
+      </g>
+
+      <!-- ── Input Guard ── -->
+      <g class="node-group" id="node-guard" data-id="guard"
+         transform="translate(500,170)" style="cursor:pointer">
+        <rect class="node-rect" x="0" y="0" width="200" height="94" style="stroke:var(--security)" />
+        <rect class="node-band" x="0" y="0" width="200" height="24" rx="10" ry="10" style="fill:var(--security); opacity:0.6" />
+        <rect x="0" y="14" width="200" height="10" style="fill:var(--security); opacity:0.6" />
+        <text class="node-label" x="100" y="13" text-anchor="middle" style="fill:#fff">🛡 Input Guard</text>
+        <text class="node-sub" x="100" y="36" text-anchor="middle">regex pattern filter</text>
+        <text class="node-sub" x="100" y="49" text-anchor="middle">blocks: PII, injections</text>
+        <text class="node-sub" x="100" y="62" text-anchor="middle">PromptInjectionError on fail</text>
+        <text class="node-sub" x="100" y="80" text-anchor="middle" style="fill:var(--security)">LangGraph node: guard</text>
+      </g>
+
+      <!-- ── Planner ── -->
+      <g class="node-group" id="node-planner" data-id="planner"
+         transform="translate(500,350)" style="cursor:pointer">
+        <rect class="node-rect" x="0" y="0" width="200" height="94" />
+        <rect class="node-band" x="0" y="0" width="200" height="24" rx="10" ry="10" />
+        <rect x="0" y="14" width="200" height="10" fill="var(--node-stroke)" />
+        <text class="node-label" x="100" y="13" text-anchor="middle">🧠 Planner</text>
+        <text class="node-sub" x="100" y="36" text-anchor="middle">LLM intent analysis</text>
+        <text class="node-sub" x="100" y="49" text-anchor="middle">creates Send() fan-out</text>
+        <text class="node-sub" x="100" y="62" text-anchor="middle">specialist task dispatch</text>
+        <text class="node-sub" x="100" y="80" text-anchor="middle" style="fill:var(--accent)">LangGraph node: planner</text>
+      </g>
+
+      <!-- ── Catalog Specialist ── -->
+      <g class="node-group" id="node-catalog" data-id="catalog"
+         transform="translate(160,560)" style="cursor:pointer">
+        <rect class="node-rect" x="0" y="0" width="200" height="150" />
+        <rect class="node-band" x="0" y="0" width="200" height="24" rx="10" ry="10" />
+        <rect x="0" y="14" width="200" height="10" fill="var(--node-stroke)" />
+        <text class="node-label" x="100" y="13" text-anchor="middle">📦 Catalog Agent</text>
+        <text class="node-sub" x="100" y="36" text-anchor="middle">ReAct loop specialist</text>
+        <!-- tool chips -->
+        <rect x="10" y="44" width="180" height="14" rx="3" fill="var(--chip-bg)" />
+        <text class="tool-chip-text" x="100" y="52" text-anchor="middle">search_catalog · get_product_details</text>
+        <rect x="10" y="62" width="180" height="14" rx="3" fill="var(--chip-bg)" />
+        <text class="tool-chip-text" x="100" y="70" text-anchor="middle">compare_products · get_categories</text>
+        <rect x="10" y="80" width="180" height="14" rx="3" fill="var(--chip-bg)" />
+        <text class="tool-chip-text" x="100" y="88" text-anchor="middle">hybrid_search (BM25+ANN+RRF)</text>
+        <line x1="10" y1="102" x2="190" y2="102" stroke="var(--border)" stroke-width="0.5" />
+        <text class="node-sub" x="100" y="116" text-anchor="middle">SQLite + sqlite-vec</text>
+        <text class="node-sub" x="100" y="130" text-anchor="middle">FTS5 · BM25 · ANN</text>
+        <text class="node-sub" x="100" y="146" text-anchor="middle" style="fill:var(--accent2)">5 tools</text>
+      </g>
+
+      <!-- ── Review Specialist ── -->
+      <g class="node-group" id="node-review" data-id="review"
+         transform="translate(500,560)" style="cursor:pointer">
+        <rect class="node-rect" x="0" y="0" width="200" height="150" />
+        <rect class="node-band" x="0" y="0" width="200" height="24" rx="10" ry="10" />
+        <rect x="0" y="14" width="200" height="10" fill="var(--node-stroke)" />
+        <text class="node-label" x="100" y="13" text-anchor="middle">⭐ Review Agent</text>
+        <text class="node-sub" x="100" y="36" text-anchor="middle">ReAct loop specialist</text>
+        <rect x="10" y="44" width="180" height="14" rx="3" fill="var(--chip-bg)" />
+        <text class="tool-chip-text" x="100" y="52" text-anchor="middle">get_reviews · get_review_summary</text>
+        <rect x="10" y="62" width="180" height="14" rx="3" fill="var(--chip-bg)" />
+        <text class="tool-chip-text" x="100" y="70" text-anchor="middle">get_top_rated · search_by_rating</text>
+        <rect x="10" y="80" width="180" height="14" rx="3" fill="var(--chip-bg)" />
+        <text class="tool-chip-text" x="100" y="88" text-anchor="middle">get_rating_distribution</text>
+        <line x1="10" y1="102" x2="190" y2="102" stroke="var(--border)" stroke-width="0.5" />
+        <text class="node-sub" x="100" y="116" text-anchor="middle">Official BV rating preserved</text>
+        <text class="node-sub" x="100" y="130" text-anchor="middle">stratified BV sampling</text>
+        <text class="node-sub" x="100" y="146" text-anchor="middle" style="fill:var(--accent2)">5 tools</text>
+      </g>
+
+      <!-- ── Scraper Specialist ── -->
+      <g class="node-group" id="node-scraper" data-id="scraper"
+         transform="translate(840,560)" style="cursor:pointer">
+        <rect class="node-rect" x="0" y="0" width="200" height="150" />
+        <rect class="node-band" x="0" y="0" width="200" height="24" rx="10" ry="10" />
+        <rect x="0" y="14" width="200" height="10" fill="var(--node-stroke)" />
+        <text class="node-label" x="100" y="13" text-anchor="middle">🌐 Scraper Agent</text>
+        <text class="node-sub" x="100" y="36" text-anchor="middle">ReAct loop specialist</text>
+        <rect x="10" y="44" width="180" height="14" rx="3" fill="var(--chip-bg)" />
+        <text class="tool-chip-text" x="100" y="52" text-anchor="middle">scrape_product · scrape_reviews</text>
+        <rect x="10" y="62" width="180" height="14" rx="3" fill="var(--chip-bg)" />
+        <text class="tool-chip-text" x="100" y="70" text-anchor="middle">enrich_catalog</text>
+        <rect x="10" y="80" width="180" height="14" rx="3" fill="var(--chip-bg)" />
+        <text class="tool-chip-text" x="100" y="88" text-anchor="middle">GraphQL → HTML → LLM fallback</text>
+        <line x1="10" y1="102" x2="190" y2="102" stroke="var(--border)" stroke-width="0.5" />
+        <text class="node-sub" x="100" y="116" text-anchor="middle">per-turn budget ContextVar</text>
+        <text class="node-sub" x="100" y="130" text-anchor="middle">TieredFetcher A→B→C</text>
+        <text class="node-sub" x="100" y="146" text-anchor="middle" style="fill:var(--accent2)">3 tools</text>
+      </g>
+
+      <!-- ── Synthesizer ── -->
+      <g class="node-group" id="node-synth" data-id="synth"
+         transform="translate(500,810)" style="cursor:pointer">
+        <rect class="node-rect" x="0" y="0" width="200" height="64" />
+        <rect class="node-band" x="0" y="0" width="200" height="24" rx="10" ry="10" />
+        <rect x="0" y="14" width="200" height="10" fill="var(--node-stroke)" />
+        <text class="node-label" x="100" y="13" text-anchor="middle">🔀 Synthesizer</text>
+        <text class="node-sub" x="100" y="38" text-anchor="middle">merge specialist results</text>
+        <text class="node-sub" x="100" y="52" text-anchor="middle">LLM narrative generation</text>
+      </g>
+
+      <!-- ── Output Guard ── -->
+      <g class="node-group" id="node-oguard" data-id="oguard"
+         transform="translate(500,940)" style="cursor:pointer">
+        <rect class="node-rect" x="0" y="0" width="200" height="94" style="stroke:var(--security)" />
+        <rect class="node-band" x="0" y="0" width="200" height="24" rx="10" ry="10" style="fill:var(--security); opacity:0.6" />
+        <rect x="0" y="14" width="200" height="10" style="fill:var(--security); opacity:0.6" />
+        <text class="node-label" x="100" y="13" text-anchor="middle" style="fill:#fff">🛡 Output Guard</text>
+        <text class="node-sub" x="100" y="36" text-anchor="middle">regex scan output</text>
+        <text class="node-sub" x="100" y="49" text-anchor="middle">blocks: API keys, PEM, JWTs</text>
+        <text class="node-sub" x="100" y="62" text-anchor="middle">OutputLeakError on fail</text>
+        <text class="node-sub" x="100" y="80" text-anchor="middle" style="fill:var(--security)">LangGraph node: output_guard</text>
+      </g>
+
+      <!-- ── Verifier ── -->
+      <g class="node-group" id="node-verif" data-id="verif"
+         transform="translate(500,1120)" style="cursor:pointer">
+        <rect class="node-rect" x="0" y="0" width="200" height="70" />
+        <rect class="node-band" x="0" y="0" width="200" height="24" rx="10" ry="10" />
+        <rect x="0" y="14" width="200" height="10" fill="var(--node-stroke)" />
+        <text class="node-label" x="100" y="13" text-anchor="middle">✔ Verifier</text>
+        <text class="node-sub" x="100" y="38" text-anchor="middle">quality + completeness check</text>
+        <text class="node-sub" x="100" y="52" text-anchor="middle">routes → answer OR retry</text>
+      </g>
+
+      <!-- ── Answer terminal ── -->
+      <g class="node-group" id="node-answer" data-id="answer"
+         transform="translate(820,1120)" style="cursor:pointer">
+        <rect class="node-rect" x="0" y="0" width="200" height="70"
+              style="stroke:var(--accent2); fill:rgba(63,185,80,0.07)" />
+        <rect class="node-band" x="0" y="0" width="200" height="24" rx="10" ry="10"
+              style="fill:var(--accent2); opacity:0.5" />
+        <rect x="0" y="14" width="200" height="10" style="fill:var(--accent2); opacity:0.5" />
+        <text class="node-label" x="100" y="13" text-anchor="middle">✅ Answer</text>
+        <text class="node-sub" x="100" y="38" text-anchor="middle">streamed to UI</text>
+        <text class="node-sub" x="100" y="52" text-anchor="middle">Streamlit st.write_stream</text>
+      </g>
+
+    </g><!-- /scene -->
+  </svg>
+
+  <!-- ─── Detail panel ─────────────────────────────────────────── -->
+  <div class="detail-panel" id="detail-panel">
+    <div class="dp-header">
+      <span class="dp-title" id="dp-title">Node</span>
+      <span class="dp-type" id="dp-type">node</span>
+      <button class="dp-close" id="dp-close" title="Close (Esc)">✕</button>
+    </div>
+    <div class="dp-body" id="dp-body"></div>
+  </div>
+
+  <!-- ─── Focus chip ───────────────────────────────────────────── -->
+  <div class="focus-chip" id="focus-chip">
+    <span id="focus-label">Viewing node</span>
+    <button id="focus-clear" title="Clear selection">✕ Clear</button>
+  </div>
+
+  <!-- ─── Minimap ──────────────────────────────────────────────── -->
+  <div class="minimap" id="minimap">
+    <canvas id="minimap-canvas" width="140" height="130"></canvas>
+    <div class="minimap-viewport" id="minimap-vp"></div>
+  </div>
+
+  <!-- ─── Zoom controls ────────────────────────────────────────── -->
+  <div class="zoom-controls">
+    <button class="zoom-btn" id="btn-zoom-in" title="Zoom in">+</button>
+    <div class="zoom-label" id="zoom-label">100%</div>
+    <button class="zoom-btn" id="btn-zoom-out" title="Zoom out">−</button>
+    <button class="zoom-btn" id="btn-zoom-fit" title="Fit (F)" style="font-size:11px">⊡</button>
+  </div>
+
+  <!-- ─── Legend ───────────────────────────────────────────────── -->
+  <div class="legend" id="legend">
+    <div class="legend-row">
+      <span class="legend-line" style="background:var(--edge)"></span>
+      Data flow
+    </div>
+    <div class="legend-row">
+      <span class="legend-line" style="background:var(--edge-flow)"></span>
+      Signal flow
+    </div>
+    <div class="legend-row">
+      <span class="legend-line" style="background:var(--edge); border-top: 2px dashed var(--edge)"></span>
+      Retry loop
+    </div>
+    <div class="legend-row">
+      <span class="legend-box" style="border:1.5px solid var(--security); background:var(--sec-bg)"></span>
+      Security guard
+    </div>
+    <div class="legend-row">
+      <span class="legend-box" style="border:1.5px dashed var(--parallel-bd); background:var(--parallel-bg)"></span>
+      Parallel zone
+    </div>
+  </div>
+
+  <!-- ─── Tooltip ──────────────────────────────────────────────── -->
+  <div class="tooltip" id="tooltip"></div>
+
+</div><!-- /canvas -->
+
+<script>
+// ─────────────────────────────────────────────────────────────────
+//  Node metadata for detail panel
+// ─────────────────────────────────────────────────────────────────
+const NODE_META = {
+  user: {
+    title: 'User',
+    type: 'interface',
+    role: 'Entry point — Streamlit chat UI',
+    props: [
+      ['Interface', 'Streamlit st.chat_input'],
+      ['Output', 'natural-language query string'],
+      ['Session', 'st.session_state conversation history'],
+    ],
+    tools: [],
+    note: 'User messages are passed directly into the LangGraph invocation as the initial state.',
+  },
+  guard: {
+    title: 'Input Guard',
+    type: 'security ①',
+    role: 'Blocks unsafe or malicious input before any LLM call',
+    props: [
+      ['Method',   'regex pattern matching'],
+      ['Blocks',   'PII, prompt-injection, system overrides'],
+      ['On fail',  'raises PromptInjectionError'],
+      ['On pass',  'routes to planner node'],
+    ],
+    tools: [],
+    note: 'Security layer ①. Patterns compiled at startup. Fully synchronous — no LLM cost on block.',
+    noteType: 'security',
+  },
+  planner: {
+    title: 'Planner',
+    type: 'orchestrator',
+    role: 'Analyses user intent and fans out tasks to specialists',
+    props: [
+      ['Model',    'LiteLLM (Azure OpenAI / OpenAI)'],
+      ['Output',   'List[Send] — LangGraph parallel dispatch'],
+      ['Strategy', 'intent classification → specialist assignment'],
+    ],
+    tools: [],
+    note: 'Uses LangGraph Send() primitives to dispatch specialist agents in parallel. Each Send carries an independent sub-state.',
+  },
+  catalog: {
+    title: 'Catalog Agent',
+    type: 'specialist',
+    role: 'Product search, comparison, and catalog look-up',
+    props: [
+      ['Pattern',  'ReAct (create_react_agent)'],
+      ['Storage',  'SQLite + sqlite-vec + FTS5'],
+      ['Search',   'BM25 + ANN + Reciprocal Rank Fusion'],
+    ],
+    tools: ['search_catalog', 'get_product_details', 'compare_products', 'get_categories', 'hybrid_search'],
+    note: 'ADR 001: SQLite chosen over Postgres for zero-infra PoC simplicity. sqlite-vec provides ANN over sentence embeddings.',
+  },
+  review: {
+    title: 'Review Agent',
+    type: 'specialist',
+    role: 'Retrieve and analyse product reviews and ratings',
+    props: [
+      ['Pattern',  'ReAct (create_react_agent)'],
+      ['Ratings',  'Official BV rating preserved (ADR 003)'],
+      ['Sampling', 'stratified BV sampling strategy'],
+    ],
+    tools: ['get_reviews', 'get_review_summary', 'get_top_rated', 'search_by_rating', 'get_rating_distribution'],
+    note: 'ADR 003: Official Bazaarvoice rating is kept as-is. Sample average is stored separately and never replaces the official figure.',
+  },
+  scraper: {
+    title: 'Scraper Agent',
+    type: 'specialist',
+    role: 'On-demand live product data enrichment',
+    props: [
+      ['Pattern',  'ReAct (create_react_agent)'],
+      ['Fallback', 'GraphQL → HTML parse → LLM extract'],
+      ['Budget',   'per-turn ContextVar scrape counter'],
+    ],
+    tools: ['scrape_product', 'scrape_reviews', 'enrich_catalog'],
+    note: 'ADR 002: GraphQL-first extraction. HTML + LLM fallback used only when GraphQL schema is unavailable. Budget ContextVar prevents runaway scraping per turn.',
+    noteType: 'warn',
+  },
+  synth: {
+    title: 'Synthesizer',
+    type: 'aggregator',
+    role: 'Merges specialist results into a coherent narrative',
+    props: [
+      ['Input',   'parallel specialist result states'],
+      ['Model',   'LiteLLM narrative generation'],
+      ['Output',  'unified answer text'],
+    ],
+    tools: [],
+    note: 'Receives results from all three specialist lanes and uses an LLM to produce a single coherent answer, resolving contradictions and gaps.',
+  },
+  oguard: {
+    title: 'Output Guard',
+    type: 'security ③',
+    role: 'Prevents secrets / sensitive data leaking in the response',
+    props: [
+      ['Method',  'regex scan on synthesized answer'],
+      ['Blocks',  'API keys, PEM certs, JWTs, bearer tokens'],
+      ['On fail', 'raises OutputLeakError — answer suppressed'],
+      ['On pass', 'routes to verifier'],
+    ],
+    tools: [],
+    note: 'Security layer ③. Mirrors the input guard pattern on the output side to catch any accidental secret exposure from tool results.',
+    noteType: 'security',
+  },
+  verif: {
+    title: 'Verifier',
+    type: 'quality gate',
+    role: 'Quality and completeness check before final output',
+    props: [
+      ['Check',   'answer addresses the original query'],
+      ['On pass', 'routes → answer terminal'],
+      ['On fail', 'bump_retry → back to planner'],
+      ['Max',     '3 retry attempts'],
+    ],
+    tools: [],
+    note: 'The bump_retry edge creates a feedback loop back to the planner. Retries are capped to prevent infinite loops.',
+  },
+  answer: {
+    title: 'Answer',
+    type: 'terminal',
+    role: 'Final streamed response to the user',
+    props: [
+      ['Delivery',  'Streamlit st.write_stream'],
+      ['Format',    'markdown-rendered chat message'],
+      ['Session',   'appended to conversation history'],
+    ],
+    tools: [],
+    note: 'The answer passes through all three security layers before reaching this node: ① input guard, ② untrusted tool envelope, ③ output guard.',
+  },
+};
+
+// Edge adjacency for hover dimming
+const EDGES = {
+  user:    { out: ['guard'] },
+  guard:   { in: ['user'],    out: ['planner'] },
+  planner: { in: ['guard', 'verif'],  out: ['catalog','review','scraper'] },
+  catalog: { in: ['planner'], out: ['synth'] },
+  review:  { in: ['planner'], out: ['synth'] },
+  scraper: { in: ['planner'], out: ['synth'] },
+  synth:   { in: ['catalog','review','scraper'], out: ['oguard'] },
+  oguard:  { in: ['synth'],   out: ['verif'] },
+  verif:   { in: ['oguard'],  out: ['answer','planner'] },
+  answer:  { in: ['verif'] },
+};
+
+// ─────────────────────────────────────────────────────────────────
+//  Pan / Zoom
+// ─────────────────────────────────────────────────────────────────
+const SCENE_W = 1200, SCENE_H = 1380;
+const canvas   = document.getElementById('canvas');
+const svg      = document.getElementById('svg');
+const scene    = document.getElementById('scene');
+let tx = 0, ty = 0, scale = 1;
+let dragging = false, dragX = 0, dragY = 0, hasDragged = false;
+
+function applyTransform(animated = false) {
+  if (animated) {
+    scene.style.transition = 'transform 0.42s cubic-bezier(.4,0,.2,1)';
+  } else {
+    scene.style.transition = 'none';
+  }
+  scene.setAttribute('transform', `translate(${tx},${ty}) scale(${scale})`);
+  updateZoomLabel();
+  scheduleMinimapUpdate();
+}
+
+function fit(animated = true) {
+  const cw = canvas.clientWidth, ch = canvas.clientHeight;
+  const pad = 40;
+  const scaleX = (cw - pad*2) / SCENE_W;
+  const scaleY = (ch - pad*2) / SCENE_H;
+  scale = Math.min(scaleX, scaleY, 1);
+  tx = (cw - SCENE_W * scale) / 2;
+  ty = (ch - SCENE_H * scale) / 2 + 20;
+  applyTransform(animated);
+}
+
+function zoomBy(delta, cx, cy) {
+  const cw = canvas.clientWidth, ch = canvas.clientHeight;
+  const mx = cx !== undefined ? cx : cw/2;
+  const my = cy !== undefined ? cy : ch/2;
+  const prev = scale;
+  scale = Math.min(Math.max(scale * delta, 0.1), 4);
+  tx = mx - (mx - tx) * (scale / prev);
+  ty = my - (my - ty) * (scale / prev);
+  applyTransform();
+}
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  zoomBy(e.deltaY < 0 ? 1.1 : 1/1.1, e.clientX - rect.left, e.clientY - rect.top);
+}, { passive: false });
+
+canvas.addEventListener('mousedown', e => {
+  if (e.target.closest('.node-group') && !e.shiftKey) return;
+  dragging = true; hasDragged = false;
+  dragX = e.clientX - tx; dragY = e.clientY - ty;
+  canvas.classList.add('panning');
+});
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const nx = e.clientX - dragX, ny = e.clientY - dragY;
+  if (Math.abs(nx - tx) > 2 || Math.abs(ny - ty) > 2) hasDragged = true;
+  tx = nx; ty = ny;
+  applyTransform();
+});
+window.addEventListener('mouseup', () => {
+  dragging = false;
+  canvas.classList.remove('panning');
+});
+
+// Touch support
+let lastPinchDist = null;
+canvas.addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    lastPinchDist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+  } else if (e.touches.length === 1) {
+    dragging = true; hasDragged = false;
+    dragX = e.touches[0].clientX - tx;
+    dragY = e.touches[0].clientY - ty;
+  }
+}, { passive: true });
+canvas.addEventListener('touchmove', e => {
+  if (e.touches.length === 2 && lastPinchDist !== null) {
+    const d = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    zoomBy(d / lastPinchDist);
+    lastPinchDist = d;
+  } else if (dragging && e.touches.length === 1) {
+    const nx = e.touches[0].clientX - dragX;
+    const ny = e.touches[0].clientY - dragY;
+    if (Math.abs(nx - tx) > 2) hasDragged = true;
+    tx = nx; ty = ny;
+    applyTransform();
+  }
+  e.preventDefault();
+}, { passive: false });
+canvas.addEventListener('touchend', () => { dragging = false; lastPinchDist = null; });
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.key === 'f' || e.key === 'F' || e.key === '0') fit();
+  if (e.key === 'Escape') closePanel();
+  if (e.key === '+' || e.key === '=') zoomBy(1.15);
+  if (e.key === '-') zoomBy(1/1.15);
+});
+
+function updateZoomLabel() {
+  document.getElementById('zoom-label').textContent = Math.round(scale * 100) + '%';
+}
+
+document.getElementById('btn-zoom-in').addEventListener('click', () => zoomBy(1.2));
+document.getElementById('btn-zoom-out').addEventListener('click', () => zoomBy(1/1.2));
+document.getElementById('btn-zoom-fit').addEventListener('click', () => fit());
+document.getElementById('btn-fit').addEventListener('click', () => fit());
+
+// ─────────────────────────────────────────────────────────────────
+//  Node interaction — hover, select, dim
+// ─────────────────────────────────────────────────────────────────
+const allNodes = document.querySelectorAll('.node-group');
+const allEdges = document.querySelectorAll('.edge');
+let selectedId = null;
+
+function getConnected(id) {
+  const m = EDGES[id] || {};
+  return new Set([id, ...(m.in||[]), ...(m.out||[])]);
+}
+
+function highlightNode(id) {
+  const connected = getConnected(id);
+  allNodes.forEach(n => {
+    const nid = n.dataset.id;
+    n.classList.remove('dimmed');
+    if (!connected.has(nid)) n.classList.add('dimmed');
+  });
+  allEdges.forEach(e => {
+    const from = e.dataset.from, to = e.dataset.to;
+    e.classList.remove('dimmed','highlighted');
+    if ((from === id || to === id) && connected.has(from) && connected.has(to)) {
+      e.classList.add('highlighted');
+      e.setAttribute('marker-end','url(#arrow-hl)');
+    } else {
+      e.classList.add('dimmed');
+      e.removeAttribute('marker-end');
+    }
+  });
+}
+
+function clearHighlight() {
+  allNodes.forEach(n => n.classList.remove('dimmed','selected'));
+  allEdges.forEach(e => {
+    e.classList.remove('dimmed','highlighted');
+    e.setAttribute('marker-end','url(#arrow)');
+  });
+}
+
+function openPanel(id) {
+  const meta = NODE_META[id];
+  if (!meta) return;
+
+  selectedId = id;
+
+  // Header
+  document.getElementById('dp-title').textContent = meta.title;
+  document.getElementById('dp-type').textContent = meta.type;
+
+  // Body
+  let html = '';
+
+  html += `<div class="dp-section">
+    <div class="dp-section-title">Role</div>
+    <div style="font-size:12px;color:var(--text);line-height:1.55">${meta.role}</div>
+  </div>`;
+
+  if (meta.props.length) {
+    html += `<div class="dp-section"><div class="dp-section-title">Properties</div>`;
+    meta.props.forEach(([k,v]) => {
+      html += `<div class="dp-row"><span class="dp-key">${k}</span><span class="dp-val">${v}</span></div>`;
+    });
+    html += '</div>';
+  }
+
+  if (meta.tools.length) {
+    html += `<div class="dp-section"><div class="dp-section-title">Tools (${meta.tools.length})</div>
+      <div class="dp-chips">`;
+    meta.tools.forEach(t => {
+      html += `<span class="dp-chip accent">${t}</span>`;
+    });
+    html += '</div></div>';
+  }
+
+  if (meta.note) {
+    const cls = meta.noteType ? `dp-note ${meta.noteType}` : 'dp-note';
+    html += `<div class="${cls}">${meta.note}</div>`;
+  }
+
+  document.getElementById('dp-body').innerHTML = html;
+
+  // Open panel
+  document.getElementById('detail-panel').classList.add('open');
+
+  // Focus chip
+  const chip = document.getElementById('focus-chip');
+  document.getElementById('focus-label').textContent = `Focused: ${meta.title}`;
+  chip.classList.add('visible');
+
+  // Highlight
+  allNodes.forEach(n => n.classList.remove('selected'));
+  document.getElementById(`node-${id}`).classList.add('selected');
+  highlightNode(id);
+}
+
+function closePanel() {
+  document.getElementById('detail-panel').classList.remove('open');
+  document.getElementById('focus-chip').classList.remove('visible');
+  clearHighlight();
+  selectedId = null;
+}
+
+document.getElementById('dp-close').addEventListener('click', closePanel);
+document.getElementById('focus-clear').addEventListener('click', closePanel);
+
+// Attach click handlers to nodes
+allNodes.forEach(node => {
+  node.addEventListener('click', e => {
+    if (hasDragged) { hasDragged = false; return; }
+    e.stopPropagation();
+    const id = node.dataset.id;
+    if (selectedId === id) { closePanel(); return; }
+    openPanel(id);
+  });
+});
+
+// Click on canvas clears
+canvas.addEventListener('click', e => {
+  if (!e.target.closest('.node-group') && !e.target.closest('.detail-panel')) {
+    closePanel();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+//  Tooltip
+// ─────────────────────────────────────────────────────────────────
+const tooltip = document.getElementById('tooltip');
+const TOOLTIPS = {
+  user:    'Streamlit chat UI · entry point',
+  guard:   '① Input Guard — regex injection filter',
+  planner: 'LLM orchestrator · Send() fan-out dispatch',
+  catalog: '5 tools · hybrid BM25+ANN search',
+  review:  '5 tools · official BV rating preserved',
+  scraper: '3 tools · GraphQL→HTML→LLM fallback',
+  synth:   'Merges parallel specialist results',
+  oguard:  '③ Output Guard — secret leak prevention',
+  verif:   'Quality gate · routes to answer or retry',
+  answer:  'Terminal · streamed to Streamlit UI',
+};
+allNodes.forEach(node => {
+  node.addEventListener('mouseenter', e => {
+    const id = node.dataset.id;
+    const txt = TOOLTIPS[id];
+    if (!txt) return;
+    tooltip.textContent = txt;
+    tooltip.classList.add('visible');
+  });
+  node.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    tooltip.style.left = (e.clientX - rect.left + 14) + 'px';
+    tooltip.style.top  = (e.clientY - rect.top  - 28) + 'px';
+  });
+  node.addEventListener('mouseleave', () => {
+    tooltip.classList.remove('visible');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+//  Minimap
+// ─────────────────────────────────────────────────────────────────
+const minimapEl = document.getElementById('minimap');
+const mmCanvas  = document.getElementById('minimap-canvas');
+const mmCtx     = mmCanvas.getContext('2d');
+const mmVp      = document.getElementById('minimap-vp');
+let mmDirty = true;
+
+const NODE_BOUNDS = [
+  { x:500,y: 60, w:200, h: 64, col:'#21262d', stroke:'#30363d' },
+  { x:500,y:170, w:200, h: 94, col:'rgba(188,140,255,0.15)', stroke:'#bc8cff' },
+  { x:500,y:350, w:200, h: 94, col:'#21262d', stroke:'#30363d' },
+  { x:160,y:560, w:200, h:150, col:'#21262d', stroke:'#30363d' },
+  { x:500,y:560, w:200, h:150, col:'#21262d', stroke:'#30363d' },
+  { x:840,y:560, w:200, h:150, col:'#21262d', stroke:'#30363d' },
+  { x:500,y:810, w:200, h: 64, col:'#21262d', stroke:'#30363d' },
+  { x:500,y:940, w:200, h: 94, col:'rgba(188,140,255,0.15)', stroke:'#bc8cff' },
+  { x:500,y:1120,w:200, h: 70, col:'#21262d', stroke:'#30363d' },
+  { x:820,y:1120,w:200, h: 70, col:'rgba(63,185,80,0.12)', stroke:'#3fb950' },
+];
+
+function drawMinimap() {
+  const mmW = mmCanvas.width, mmH = mmCanvas.height;
+  const sx = mmW / SCENE_W, sy = mmH / SCENE_H;
+  mmCtx.clearRect(0, 0, mmW, mmH);
+
+  // bg
+  mmCtx.fillStyle = 'rgba(255,255,255,0.03)';
+  mmCtx.fillRect(0,0,mmW,mmH);
+
+  // nodes
+  NODE_BOUNDS.forEach(nb => {
+    mmCtx.fillStyle = nb.col;
+    mmCtx.strokeStyle = nb.stroke;
+    mmCtx.lineWidth = 0.8;
+    const rx = nb.x * sx, ry = nb.y * sy, rw = nb.w * sx, rh = nb.h * sy;
+    mmCtx.beginPath();
+    mmCtx.roundRect(rx, ry, rw, rh, 2);
+    mmCtx.fill();
+    mmCtx.stroke();
+  });
+
+  // viewport indicator
+  const cw = canvas.clientWidth, ch = canvas.clientHeight;
+  const vpX = (-tx / scale) * sx;
+  const vpY = (-ty / scale) * sy;
+  const vpW = (cw / scale) * sx;
+  const vpH = (ch / scale) * sy;
+  mmVp.style.left   = Math.max(0, vpX) + 'px';
+  mmVp.style.top    = Math.max(0, vpY) + 'px';
+  mmVp.style.width  = Math.min(mmW - Math.max(0,vpX), vpW) + 'px';
+  mmVp.style.height = Math.min(mmH - Math.max(0,vpY), vpH) + 'px';
+
+  mmDirty = false;
+}
+
+function scheduleMinimapUpdate() {
+  if (!mmDirty) {
+    mmDirty = true;
+    requestAnimationFrame(drawMinimap);
+  }
+}
+
+// Click on minimap to jump
+mmCanvas.addEventListener('click', e => {
+  const rect = mmCanvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / rect.width;
+  const my = (e.clientY - rect.top)  / rect.height;
+  const cw = canvas.clientWidth, ch = canvas.clientHeight;
+  tx = cw/2 - mx * SCENE_W * scale;
+  ty = ch/2 - my * SCENE_H * scale;
+  applyTransform(true);
+});
+
+// ─────────────────────────────────────────────────────────────────
+//  Header buttons
+// ─────────────────────────────────────────────────────────────────
+const btnMotion = document.getElementById('btn-motion');
+btnMotion.addEventListener('click', () => {
+  const html = document.documentElement;
+  const running = html.dataset.ambientMotion === 'running';
+  html.dataset.ambientMotion = running ? 'paused' : 'running';
+  btnMotion.classList.toggle('active', !running);
+  btnMotion.textContent = running ? '⏸ Motion' : '▶ Motion';
+});
+
+const btnMinimap = document.getElementById('btn-minimap');
+btnMinimap.addEventListener('click', () => {
+  minimapEl.classList.toggle('hidden');
+  btnMinimap.classList.toggle('active', !minimapEl.classList.contains('hidden'));
+});
+
+const btnLegend = document.getElementById('btn-legend');
+const legendEl = document.getElementById('legend');
+btnLegend.addEventListener('click', () => {
+  legendEl.classList.toggle('hidden');
+  btnLegend.classList.toggle('active', !legendEl.classList.contains('hidden'));
+});
+
+const btnTheme = document.getElementById('btn-theme');
+btnTheme.addEventListener('click', () => {
+  const html = document.documentElement;
+  html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
+  scheduleMinimapUpdate();
+});
+
+// ─────────────────────────────────────────────────────────────────
+//  Init
+// ─────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => fit(false));
+fit(false);
+setTimeout(() => drawMinimap(), 100);
+</script>
+</body>
+</html>
